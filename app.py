@@ -28,17 +28,17 @@ N = st.number_input("Northing (m)", format="%.2f")
 # ------------------------
 # CRS Transformation
 # ------------------------
-projected_crs = "EPSG:32632"  # example CRS
+projected_crs = "EPSG:32632"  # Example CRS
 transformer = Transformer.from_crs(projected_crs, "EPSG:4326", always_xy=True)
 
 if st.button("Find LGA"):
     # Convert meters to lat/lon
     lon, lat = transformer.transform(E, N)
     point = Point(lon, lat)
-    
+
     # Check which LGA contains the point
     match = lga_gdf[lga_gdf.contains(point)]
-    
+
     if not match.empty:
         # Try to find a column with 'NAME'
         name_cols = [c for c in match.columns if "NAME" in c.upper()]
@@ -46,17 +46,24 @@ if st.button("Find LGA"):
             lga_name = match.iloc[0][name_cols[0]]
         else:
             lga_name = "Unknown"
-        
+
         st.success(f"✅ The coordinate is in **{lga_name} LGA**.")
 
         # -------------------------------------------------
-        # 🔥 NEW POLYGON MAP SECTION (PASTE HERE)
+        # 🔥 FIXED POLYGON MAP SECTION (NEW)
         # -------------------------------------------------
+        # Extract polygon geometry
         poly_json = match.__geo_interface__["features"][0]["geometry"]
 
+        # Pydeck needs coordinates wrapped inside dict
+        polygon_data = [{
+            "coordinates": poly_json["coordinates"]
+        }]
+
+        # Polygon layer
         polygon_layer = pdk.Layer(
             "PolygonLayer",
-            [poly_json],
+            polygon_data,
             get_polygon="coordinates",
             get_fill_color="[0, 100, 255, 60]",
             get_line_color="[0, 50, 200]",
@@ -65,25 +72,32 @@ if st.button("Find LGA"):
             stroked=True,
         )
 
+        # Point layer
         point_layer = pdk.Layer(
             "ScatterplotLayer",
             [{"lon": lon, "lat": lat}],
             get_position="[lon, lat]",
             get_color="[255, 0, 0]",
-            get_radius=200,
+            get_radius=300,
         )
 
+        # Auto-center map
         view_state = pdk.ViewState(
             longitude=lon,
             latitude=lat,
-            zoom=9,
+            zoom=8,
             pitch=0,
         )
 
         st.subheader("📍 LGA Boundary Map")
-        st.pydeck_chart(pdk.Deck(layers=[polygon_layer, point_layer],
-                                 initial_view_state=view_state))
+        st.pydeck_chart(
+            pdk.Deck(
+                layers=[polygon_layer, point_layer],
+                initial_view_state=view_state,
+                map_style=None  # Offline mode
+            )
+        )
         # -------------------------------------------------
-        
+
     else:
         st.error("❌ No LGA found for this coordinate.")
