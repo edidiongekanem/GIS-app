@@ -23,7 +23,7 @@ lga_gdf = load_lga_data()
 # ------------------------
 # App header
 # ------------------------
-st.title("🗺️ Nigeria LGA Finder (Offline)")
+st.title("🗺️ Nigeria LGA Finder")
 st.write("Enter **Easting/Northing (meters)** in your projected CRS to find the LGA.")
 
 # ------------------------
@@ -110,3 +110,4 @@ if st.button("Find LGA"):
 
     else:
         st.error("❌ No LGA found for this coordinate.")
+
