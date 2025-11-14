@@ -51,5 +51,62 @@ if st.button("Find LGA"):
 
     if not match.empty:
         # Get LGA name (first column containing "NAME")
-        name_cols = [c for c in match.columns if "NAM]()_
-v
+        name_cols = [c for c in match.columns if "NAME" in c.upper()]
+        lga_name = match.iloc[0][name_cols[0]] if name_cols else "Unknown"
+
+        st.success(f"✅ The coordinate is in **{lga_name} LGA**.")
+
+        # ------------------------
+        # Prepare polygon data for Pydeck
+        # ------------------------
+        geojson_dict = json.loads(match.to_json())
+        polygon_data = []
+        for feature in geojson_dict["features"]:
+            geom_type = feature["geometry"]["type"]
+            coords = feature["geometry"]["coordinates"]
+            if geom_type == "Polygon":
+                polygon_data.append({"coordinates": coords})
+            elif geom_type == "MultiPolygon":
+                for poly in coords:
+                    polygon_data.append({"coordinates": poly})
+
+        # ------------------------
+        # Create Pydeck layers
+        # ------------------------
+        polygon_layer = pdk.Layer(
+            "PolygonLayer",
+            polygon_data,
+            get_polygon="coordinates",
+            get_fill_color="[0, 100, 255, 60]",
+            get_line_color="[0, 50, 200]",
+            pickable=False,
+            extruded=False,
+            stroked=True,
+        )
+
+        point_layer = pdk.Layer(
+            "ScatterplotLayer",
+            [{"lon": lon, "lat": lat}],
+            get_position="[lon, lat]",
+            get_color="[255, 0, 0]",
+            get_radius=300,
+        )
+
+        view_state = pdk.ViewState(
+            longitude=lon,
+            latitude=lat,
+            zoom=8,
+            pitch=0,
+        )
+
+        st.subheader("📍 LGA Boundary Map")
+        st.pydeck_chart(
+            pdk.Deck(
+                layers=[polygon_layer, point_layer],
+                initial_view_state=view_state,
+                map_style=None  # Offline-ready
+            )
+        )
+
+    else:
+        st.error("❌ No LGA found for this coordinate.")
