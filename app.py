@@ -4,12 +4,11 @@ from shapely.geometry import Point, Polygon
 from pyproj import Transformer
 import pydeck as pdk
 import json
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A4
 
 st.set_page_config(page_title="Geo Tools Suite", layout="centered")
-
-# =========================================================
-#                   LANDING PAGE MENU
-# =========================================================
 
 st.title("🌍 Geo Tools Suite")
 
@@ -22,18 +21,14 @@ if tool == "🏠 Home":
     st.header("Welcome!")
     st.write("""
     Select any of the tools from the sidebar:
-    
+
     ### 🗺️ Nigeria LGA Finder  
     Enter Easting/Northing and find which LGA the point belongs to.
-    
+
     ### 📐 Parcel Plotter  
     Input coordinates, plot a parcel boundary and calculate the area.
     """)
 
-
-# =========================================================
-#                   NIGERIA LGA FINDER
-# =========================================================
 elif tool == "Nigeria LGA Finder":
 
     st.header("🗺️ Nigeria LGA Finder (Offline)")
@@ -51,7 +46,6 @@ elif tool == "Nigeria LGA Finder":
     transformer = Transformer.from_crs(projected_crs, "EPSG:4326", always_xy=True)
 
     if st.button("Find LGA"):
-
         lon, lat = transformer.transform(E, N)
         point = Point(lon, lat)
 
@@ -63,7 +57,6 @@ elif tool == "Nigeria LGA Finder":
 
             st.success(f"✅ This coordinate is inside **{lga_name} LGA**")
 
-            # --- Polygon Data ---
             geojson_dict = json.loads(match.to_json())
             polygon_data = []
 
@@ -86,7 +79,6 @@ elif tool == "Nigeria LGA Finder":
                 stroked=True,
             )
 
-            # INTERACTIVE ZOOM-SCALING POINT MARKER
             point_layer = pdk.Layer(
                 "ScatterplotLayer",
                 [{"lon": lon, "lat": lat}],
@@ -113,18 +105,12 @@ elif tool == "Nigeria LGA Finder":
         else:
             st.error("❌ No LGA found for this location.")
 
-
-
-# =========================================================
-#                      PARCEL PLOTTER
-# =========================================================
 elif tool == "Parcel Plotter":
 
     st.header("📐 Parcel Boundary Plotter (UTM Coordinates)")
     st.write("Enter UTM Easting/Northing (Zone 32N, meters).")
 
-    # CRS definitions
-    projected_crs = "EPSG:32632"    # UTM Zone 32N
+    projected_crs = "EPSG:32632"
     transformer = Transformer.from_crs(projected_crs, "EPSG:4326", always_xy=True)
 
     num_points = st.number_input("Number of beacons:", min_value=3, step=1)
@@ -138,31 +124,22 @@ elif tool == "Parcel Plotter":
             utm_coords.append((e, n))
 
     if st.button("Plot Parcel"):
-
         try:
-            # Auto-close polygon
             if utm_coords[0] != utm_coords[-1]:
                 utm_coords.append(utm_coords[0])
 
-            # Build polygon in UTM for accurate area
             polygon = Polygon(utm_coords)
 
             if not polygon.is_valid:
                 st.error("❌ Invalid boundary shape. Check point sequence.")
             else:
-
-                # AREA IN SQUARE METERS (correct, because UTM)
                 area = polygon.area
                 st.success("✅ Parcel plotted successfully!")
                 st.write(f"### Area: **{area:,.2f} m²**")
 
-                # Convert UTM → Lat/Lon for mapping
                 ll_coords = [transformer.transform(x, y) for x, y in utm_coords]
 
-                # Polygon for pydeck
-                polygon_data = [{
-                    "coordinates": [ll_coords]
-                }]
+                polygon_data = [{"coordinates": [ll_coords]}]
 
                 polygon_layer = pdk.Layer(
                     "PolygonLayer",
@@ -183,13 +160,11 @@ elif tool == "Parcel Plotter":
                     radius_max_pixels=30,
                 )
 
-                # Center on the polygon centroid
                 centroid_lon, centroid_lat = transformer.transform(
                     polygon.centroid.x,
                     polygon.centroid.y
                 )
 
-                # 🟦 SAME BASEMAP AS LGA FINDER (map_style=None)
                 st.pydeck_chart(
                     pdk.Deck(
                         layers=[polygon_layer, point_layer],
@@ -198,9 +173,106 @@ elif tool == "Parcel Plotter":
                             latitude=centroid_lat,
                             zoom=17
                         ),
-                        map_style=None  # <-- SAME BASEMAP
+                        map_style=None
                     )
                 )
+
+                # ----------- PRINT OPTIONS -----------
+                colA, colB = st.columns(2)
+
+                # =======================
+                # 1️⃣ SKETCH PLAN PDF
+                # =======================
+                if colA.button("📄 Print Sketch Plan"):
+                    try:
+                        pdf_file = "parcel_sketch_plan.pdf"
+                        styles = getSampleStyleSheet()
+                        doc = SimpleDocTemplate(pdf_file, pagesize=A4)
+                        story = []
+
+                        story.append(Paragraph("<b>Parcel Sketch Plan</b>", styles['Title']))
+                        story.append(Spacer(1, 12))
+                        story.append(Paragraph(f"<b>Area:</b> {area:,.2f} m²", styles['Normal']))
+                        story.append(Spacer(1, 12))
+
+                        # Coordinate Table
+                        from reportlab.platypus import Table, TableStyle
+                        from reportlab.lib import colors
+                        table_data = [["Point", "Easting", "Northing"]]
+                        for idx, (xe, yn) in enumerate(utm_coords):
+                            table_data.append([f"{idx+1}", f"{xe:.2f}", f"{yn:.2f}"])
+                        coord_table = Table(table_data, colWidths=[60, 120, 120])
+                        coord_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                            ('GRID', (0,0), (-1,-1), 1, colors.black)
+                        ]))
+                        story.append(coord_table)
+                        story.append(Spacer(1, 20))
+
+                        doc.build(story)
+                        with open(pdf_file, "rb") as f:
+                            st.download_button("⬇️ Download Sketch Plan", f, pdf_file, mime="application/pdf")
+                    except Exception as e:
+                        st.error(f"PDF error: {e}")
+
+                # ================================
+                # 2️⃣ COMPUTATION SHEET PDF
+                # ================================
+                if colB.button("📊 Print Computation Sheet"):
+                    try:
+                        pdf_file = "parcel_computation_sheet.pdf"
+                        styles = getSampleStyleSheet()
+                        doc = SimpleDocTemplate(pdf_file, pagesize=A4)
+                        story = []
+
+                        story.append(Paragraph("<b>Parcel Computation Sheet</b>", styles['Title']))
+                        story.append(Spacer(1, 10))
+                        story.append(Paragraph(f"<b>Total Area:</b> {area:,.2f} m²", styles['Heading2']))
+                        story.append(Spacer(1, 15))
+
+                        # COMPUTATIONS: DISTANCES, BEARINGS, ANGLES
+                        from math import atan2, degrees, sqrt
+                        comp_data = [["Line", "Start", "End", "Distance (m)", "Bearing", "Angle"]]
+
+                        for i in range(len(utm_coords)-1):
+                            x1, y1 = utm_coords[i]
+                            x2, y2 = utm_coords[i+1]
+
+                            dx = x2 - x1
+                            dy = y2 - y1
+
+                            distance = sqrt(dx*dx + dy*dy)
+                            bearing_rad = atan2(dx, dy)
+                            bearing_deg = (degrees(bearing_rad) + 360) % 360
+
+                            angle = "-"  # Placeholder
+
+                            comp_data.append([
+                                f"L{i+1}",
+                                f"P{i+1}", f"P{i+2}",
+                                f"{distance:.2f}",
+                                f"{bearing_deg:.2f}°",
+                                angle
+                            ])
+
+                        comp_table = Table(comp_data, colWidths=[50, 50, 50, 90, 80, 60])
+                        comp_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                            ('GRID', (0,0), (-1,-1), 1, colors.black),
+                            ('ALIGN', (0,0), (-1,-1), 'CENTER')
+                        ]))
+
+                        story.append(comp_table)
+                        story.append(Spacer(1, 20))
+
+                        doc.build(story)
+                        with open(pdf_file, "rb") as f:
+                            st.download_button("⬇️ Download Computation Sheet", f, pdf_file, mime="application/pdf")
+                    except Exception as e:
+                        st.error(f"PDF error: {e}")
+
+        except Exception as e:
+                        st.error(f"PDF error: {e}")
 
         except Exception as e:
             st.error(f"Error: {e}")
