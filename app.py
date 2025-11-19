@@ -114,7 +114,7 @@ elif tool == "Parcel Plotter":
         story = [Paragraph("<b>Parcel Sketch Plan</b>", styles['Title']), Spacer(1, 12), Paragraph("(Sketch will be drawn in PDF)", styles['Normal'])]
         doc.build(story)
         sketch_buffer.seek(0)
-        col1.download_button("📄 Print Sketch Plan", data=sketch_buffer, file_name="parcel_sketch_plan.pdf", mime="application/pdf")
+        col1.download_button("📄 Print Sketch Plan", data=sketch_buffer.getvalue(), file_name="parcel_sketch_plan.pdf", mime="application/pdf")
 
         # Computation Sheet PDF
         comp_buffer = io.BytesIO()
@@ -159,4 +159,4 @@ elif tool == "Parcel Plotter":
 
         doc.build(comp_buffer)
         comp_buffer.seek(0)
-        col2.download_button("📄 Print Computation Sheet", data=comp_buffer, file_name="parcel_computation_sheet.pdf", mime="application/pdf")
+        col2.download_button("📄 Print Computation Sheet", data=comp_buffer.getvalue(), file_name="parcel_computation_sheet.pdf", mime="application/pdf")
