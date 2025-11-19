@@ -4,9 +4,12 @@ from shapely.geometry import Point, Polygon
 from pyproj import Transformer
 import pydeck as pdk
 import json
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from math import atan2, degrees, sqrt
+import io
 
 st.set_page_config(page_title="Geo Tools Suite", layout="centered")
 
@@ -107,6 +110,9 @@ elif tool == "Nigeria LGA Finder":
 
 elif tool == "Parcel Plotter":
 
+    if "parcel_plotted" not in st.session_state:
+        st.session_state.parcel_plotted = False
+
     st.header("📐 Parcel Boundary Plotter (UTM Coordinates)")
     st.write("Enter UTM Easting/Northing (Zone 32N, meters).")
 
@@ -124,94 +130,147 @@ elif tool == "Parcel Plotter":
             utm_coords.append((e, n))
 
     if st.button("Plot Parcel"):
-        try:
-            if utm_coords[0] != utm_coords[-1]:
-                utm_coords.append(utm_coords[0])
+        if utm_coords[0] != utm_coords[-1]:
+            utm_coords.append(utm_coords[0])
+        st.session_state.parcel_plotted = True
+        st.session_state.utm_coords = utm_coords
 
-            polygon = Polygon(utm_coords)
+        polygon = Polygon(utm_coords)
 
-            if not polygon.is_valid:
-                st.error("❌ Invalid boundary shape. Check point sequence.")
-            else:
-                area = polygon.area
-                st.success("✅ Parcel plotted successfully!")
-                st.write(f"### Area: **{area:,.2f} m²**")
+        if not polygon.is_valid:
+            st.error("❌ Invalid boundary shape. Check point sequence.")
+        else:
+            area = polygon.area
+            st.success("✅ Parcel plotted successfully!")
+            st.write(f"### Area: **{area:,.2f} m²**")
 
-                ll_coords = [transformer.transform(x, y) for x, y in utm_coords]
+            ll_coords = [transformer.transform(x, y) for x, y in utm_coords]
+            polygon_data = [{"coordinates": [ll_coords]}]
 
-                polygon_data = [{"coordinates": [ll_coords]}]
+            polygon_layer = pdk.Layer(
+                "PolygonLayer",
+                polygon_data,
+                get_polygon="coordinates",
+                get_fill_color="[0, 150, 255, 80]",
+                get_line_color="[0, 50, 200]",
+                stroked=True,
+            )
 
-                polygon_layer = pdk.Layer(
-                    "PolygonLayer",
-                    polygon_data,
-                    get_polygon="coordinates",
-                    get_fill_color="[0, 150, 255, 80]",
-                    get_line_color="[0, 50, 200]",
-                    stroked=True,
-                )
+            point_layer = pdk.Layer(
+                "ScatterplotLayer",
+                [{"lon": lon, "lat": lat} for lon, lat in ll_coords],
+                get_position="[lon, lat]",
+                get_color="[0, 0, 0]",  # square beacon color
+                radius_scale=200,          # approximate square symbol
+                radius_min_pixels=5,
+                radius_max_pixels=10,
+            )
 
-                point_layer = pdk.Layer(
-                    "ScatterplotLayer",
-                    [{"lon": lon, "lat": lat} for lon, lat in ll_coords],
-                    get_position="[lon, lat]",
-                    get_color="[255, 0, 0]",
-                    radius_scale=1,
-                    radius_min_pixels=3,
-                    radius_max_pixels=30,
-                )
+            centroid_lon, centroid_lat = transformer.transform(
+                polygon.centroid.x,
+                polygon.centroid.y
+            )
 
-                centroid_lon, centroid_lat = transformer.transform(
-                    polygon.centroid.x,
-                    polygon.centroid.y
-                )
+            r = pdk.Deck(
+                layers=[polygon_layer, point_layer],
+                initial_view_state=pdk.ViewState(
+                    longitude=centroid_lon,
+                    latitude=centroid_lat,
+                    zoom=17
+                ),
+                map_style=None
+            )
 
-                st.pydeck_chart(
-                    pdk.Deck(
-                        layers=[polygon_layer, point_layer],
-                        initial_view_state=pdk.ViewState(
-                            longitude=centroid_lon,
-                            latitude=centroid_lat,
-                            zoom=17
-                        ),
-                        map_style=None
-                    )
-                )
+            st.pydeck_chart(r)
 
-                # ----------- PRINT OPTIONS -----------
-                colA, colB = st.columns(2)
+    # --- PRINT OPTIONS AFTER PLOT ---
+    if st.session_state.parcel_plotted:
+        colA, colB = st.columns(2)
 
-                # =======================
-                # 1️⃣ SKETCH PLAN PDF
-                # =======================
-                if colA.button("📄 Print Sketch Plan"):
-                    try:
-                        pdf_file = "parcel_sketch_plan.pdf"
-                        styles = getSampleStyleSheet()
-                        doc = SimpleDocTemplate(pdf_file, pagesize=A4)
-                        story = []
+        with colA:
+            if st.button("📄 Print Sketch Plan"):
+                try:
+                    pdf_file = "parcel_sketch_plan.pdf"
+                    buffer = io.BytesIO()
+                    doc = SimpleDocTemplate(buffer, pagesize=A4)
+                    styles = getSampleStyleSheet()
+                    story = []
 
-                        story.append(Paragraph("<b>Parcel Sketch Plan</b>", styles['Title']))
-                        story.append(Spacer(1, 12))
-                        story.append(Paragraph(f"<b>Area:</b> {area:,.2f} m²", styles['Normal']))
-                        story.append(Spacer(1, 12))
+                    story.append(Paragraph("<b>Parcel Sketch Plan</b>", styles['Title']))
+                    story.append(Spacer(1, 12))
+                    story.append(Paragraph(f"<b>Area:</b> {area:,.2f} m²", styles['Normal']))
+                    story.append(Spacer(1, 12))
 
-                        # Coordinate Table
-                        from reportlab.platypus import Table, TableStyle
-                        from reportlab.lib import colors
-                        table_data = [["Point", "Easting", "Northing"]]
-                        for idx, (xe, yn) in enumerate(utm_coords):
-                            table_data.append([f"{idx+1}", f"{xe:.2f}", f"{yn:.2f}"])
-                        coord_table = Table(table_data, colWidths=[60, 120, 120])
-                        coord_table.setStyle(TableStyle([
-                            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-                            ('GRID', (0,0), (-1,-1), 1, colors.black)
-                        ]))
-                        story.append(coord_table)
-                        story.append(Spacer(1, 20))
+                    table_data = [["Point", "Easting", "Northing"]]
+                    for idx, (xe, yn) in enumerate(st.session_state.utm_coords):
+                        table_data.append([f"{idx+1}", f"{xe:.2f}", f"{yn:.2f}"])
 
-                        doc.build(story)
-                        with open(pdf_file, "rb") as f:
-                            st.download_button("⬇️ Download Sketch Plan", f, pdf_file, mime="application/pdf")
-                    except Exception as e:
-            st.error(f"Error: {e}")
-after 
+                    coord_table = Table(table_data, colWidths=[60, 120, 120])
+                    coord_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                        ('GRID', (0,0), (-1,-1), 1, colors.black),
+                        ('ALIGN', (0,0), (-1,-1), 'CENTER')
+                    ]))
+
+                    story.append(coord_table)
+                    story.append(Spacer(1, 20))
+
+                    # Add snapshot of pydeck map
+                    img_data = r.to_image()  # capture as PNG
+                    img_buffer = io.BytesIO()
+                    img_data.save(img_buffer, format='PNG')
+                    img_buffer.seek(0)
+
+                    story.append(Image(img_buffer, width=400, height=400))
+
+                    doc.build(story)
+                    buffer.seek(0)
+                    st.download_button("⬇️ Download Sketch Plan", buffer, file_name=pdf_file, mime="application/pdf")
+
+                except Exception as e:
+                    st.error(f"PDF error: {e}")
+
+        with colB:
+            if st.button("📊 Print Computation Sheet"):
+                try:
+                    pdf_file = "parcel_computation_sheet.pdf"
+                    buffer = io.BytesIO()
+                    doc = SimpleDocTemplate(buffer, pagesize=A4)
+                    styles = getSampleStyleSheet()
+                    story = []
+
+                    story.append(Paragraph("<b>Parcel Computation Sheet</b>", styles['Title']))
+                    story.append(Spacer(1, 12))
+                    story.append(Paragraph(f"<b>Total Area:</b> {area:,.2f} m²", styles['Heading2']))
+                    story.append(Spacer(1, 15))
+
+                    comp_data = [["Line", "Start", "End", "Distance (m)", "Bearing (°)", "Angle (°)"]]
+                    coords = st.session_state.utm_coords
+                    n = len(coords)
+                    for i in range(n-1):
+                        x1, y1 = coords[i]
+                        x2, y2 = coords[i+1]
+                        dx = x2 - x1
+                        dy = y2 - y1
+                        distance = sqrt(dx*dx + dy*dy)
+                        bearing = (degrees(atan2(dx, dy)) + 360) % 360
+                        # interior angle placeholder
+                        angle = "-"
+                        comp_data.append([f"L{i+1}", f"P{i+1}", f"P{i+2}", f"{distance:.2f}", f"{bearing:.2f}", angle])
+
+                    comp_table = Table(comp_data, colWidths=[50,50,50,90,80,60])
+                    comp_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                        ('GRID', (0,0), (-1,-1), 1, colors.black),
+                        ('ALIGN', (0,0), (-1,-1), 'CENTER')
+                    ]))
+
+                    story.append(comp_table)
+                    story.append(Spacer(1, 20))
+
+                    doc.build(story)
+                    buffer.seek(0)
+                    st.download_button("⬇️ Download Computation Sheet", buffer, file_name=pdf_file, mime="application/pdf")
+
+                except Exception as e:
+                    st.error(f"PDF error: {e}")
