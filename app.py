@@ -8,6 +8,8 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
+from reportlab.graphics.shapes import Drawing, Polygon as RLPolygon, Line, String
+from reportlab.graphics import renderPDF
 from math import atan2, degrees, sqrt
 import io
 
@@ -32,82 +34,6 @@ if tool == "🏠 Home":
     Input coordinates, plot a parcel boundary and calculate the area.
     """)
 
-elif tool == "Nigeria LGA Finder":
-
-    st.header("🗺️ Nigeria LGA Finder (Offline)")
-
-    @st.cache_resource
-    def load_lga_data():
-        return gpd.read_file("NGA_LGA_Boundaries_2_-2954311847614747693.geojson")
-
-    lga_gdf = load_lga_data()
-
-    E = st.number_input("Easting (m)", format="%.2f")
-    N = st.number_input("Northing (m)", format="%.2f")
-
-    projected_crs = "EPSG:32632"
-    transformer = Transformer.from_crs(projected_crs, "EPSG:4326", always_xy=True)
-
-    if st.button("Find LGA"):
-        lon, lat = transformer.transform(E, N)
-        point = Point(lon, lat)
-
-        match = lga_gdf[lga_gdf.contains(point)]
-
-        if not match.empty:
-            name_cols = [c for c in match.columns if "NAME" in c.upper()]
-            lga_name = match.iloc[0][name_cols[0]] if name_cols else "Unknown"
-
-            st.success(f"✅ This coordinate is inside **{lga_name} LGA**")
-
-            geojson_dict = json.loads(match.to_json())
-            polygon_data = []
-
-            for feat in geojson_dict["features"]:
-                t = feat["geometry"]["type"]
-                coords = feat["geometry"]["coordinates"]
-
-                if t == "Polygon":
-                    polygon_data.append({"coordinates": coords})
-                elif t == "MultiPolygon":
-                    for poly in coords:
-                        polygon_data.append({"coordinates": poly})
-
-            polygon_layer = pdk.Layer(
-                "PolygonLayer",
-                polygon_data,
-                get_polygon="coordinates",
-                get_fill_color="[0, 120, 255, 60]",
-                get_line_color="[0, 80, 200]",
-                stroked=True,
-            )
-
-            point_layer = pdk.Layer(
-                "ScatterplotLayer",
-                [{"lon": lon, "lat": lat}],
-                get_position="[lon, lat]",
-                get_color="[255, 0, 0]",
-                radius_scale=1,
-                radius_min_pixels=5,
-                radius_max_pixels=40,
-            )
-
-            centroid = Point(lon, lat)
-
-            st.pydeck_chart(
-                pdk.Deck(
-                    layers=[polygon_layer, point_layer],
-                    initial_view_state=pdk.ViewState(
-                        latitude=centroid.y,
-                        longitude=centroid.x,
-                        zoom=10
-                    ),
-                    map_style=None
-                )
-            )
-        else:
-            st.error("❌ No LGA found for this location.")
-
 elif tool == "Parcel Plotter":
 
     if "parcel_plotted" not in st.session_state:
@@ -116,10 +42,6 @@ elif tool == "Parcel Plotter":
         st.session_state.parcel_area = 0
 
     st.header("📐 Parcel Boundary Plotter (UTM Coordinates)")
-    st.write("Enter UTM Easting/Northing (Zone 32N, meters).")
-
-    projected_crs = "EPSG:32632"
-    transformer = Transformer.from_crs(projected_crs, "EPSG:4326", always_xy=True)
 
     num_points = st.number_input("Number of beacons:", min_value=3, step=1)
 
@@ -138,90 +60,68 @@ elif tool == "Parcel Plotter":
         st.session_state.utm_coords = utm_coords
 
         polygon = Polygon(utm_coords)
-
         if not polygon.is_valid:
             st.error("❌ Invalid boundary shape. Check point sequence.")
         else:
             st.session_state.parcel_area = polygon.area
-            st.success("✅ Parcel plotted successfully!")
-            st.write(f"### Area: **{st.session_state.parcel_area:,.2f} m²**")
+            st.success(f"✅ Parcel plotted successfully! Area: {st.session_state.parcel_area:,.2f} m²")
 
-            ll_coords = [transformer.transform(x, y) for x, y in utm_coords]
-            polygon_data = [{"coordinates": [ll_coords]}]
-
-            polygon_layer = pdk.Layer(
-                "PolygonLayer",
-                polygon_data,
-                get_polygon="coordinates",
-                get_fill_color="[0, 150, 255, 80]",
-                get_line_color="[0, 50, 200]",
-                stroked=True,
-            )
-
-            point_layer = pdk.Layer(
-                "ScatterplotLayer",
-                [{"lon": lon, "lat": lat} for lon, lat in ll_coords],
-                get_position="[lon, lat]",
-                get_color="[0, 0, 0]",
-                radius_scale=200,
-                radius_min_pixels=5,
-                radius_max_pixels=10,
-            )
-
-            centroid_lon, centroid_lat = transformer.transform(
-                polygon.centroid.x,
-                polygon.centroid.y
-            )
-
-            st.pydeck_chart(
-                pdk.Deck(
-                    layers=[polygon_layer, point_layer],
-                    initial_view_state=pdk.ViewState(
-                        longitude=centroid_lon,
-                        latitude=centroid_lat,
-                        zoom=17
-                    ),
-                    map_style=None
-                )
-            )
-
-    # --- PRINT OPTIONS AFTER PLOT ---
     if st.session_state.parcel_plotted:
-        colA, colB = st.columns(2)
+        if st.button("📄 Print Sketch Plan"):
+            try:
+                buffer = io.BytesIO()
+                doc = SimpleDocTemplate(buffer, pagesize=A4)
+                styles = getSampleStyleSheet()
+                story = []
 
-        with colA:
-            if st.button("📄 Print Sketch Plan"):
-                try:
-                    pdf_file = "parcel_sketch_plan.pdf"
-                    buffer = io.BytesIO()
-                    doc = SimpleDocTemplate(buffer, pagesize=A4)
-                    styles = getSampleStyleSheet()
-                    story = []
+                story.append(Paragraph("<b>Parcel Sketch Plan</b>", styles['Title']))
+                story.append(Spacer(1, 12))
+                story.append(Paragraph(f"<b>Area:</b> {st.session_state.parcel_area:,.2f} m²", styles['Normal']))
+                story.append(Spacer(1, 12))
 
-                    story.append(Paragraph("<b>Parcel Sketch Plan</b>", styles['Title']))
-                    story.append(Spacer(1, 12))
-                    story.append(Paragraph(f"<b>Area:</b> {st.session_state.parcel_area:,.2f} m²", styles['Normal']))
-                    story.append(Spacer(1, 12))
+                # Draw the polygon
+                drawing = Drawing(400, 400)
+                coords = st.session_state.utm_coords
 
-                    table_data = [["Point", "Easting", "Northing"]]
-                    for idx, (xe, yn) in enumerate(st.session_state.utm_coords):
-                        table_data.append([f"{idx+1}", f"{xe:.2f}", f"{yn:.2f}"])
+                # Normalize coordinates to fit the drawing box
+                xs, ys = zip(*coords)
+                min_x, max_x = min(xs), max(xs)
+                min_y, max_y = min(ys), max(ys)
+                scale_x = 350 / (max_x - min_x) if max_x != min_x else 1
+                scale_y = 350 / (max_y - min_y) if max_y != min_y else 1
+                scale = min(scale_x, scale_y)
 
-                    coord_table = Table(table_data, colWidths=[60, 120, 120])
-                    coord_table.setStyle(TableStyle([
-                        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-                        ('GRID', (0,0), (-1,-1), 1, colors.black),
-                        ('ALIGN', (0,0), (-1,-1), 'CENTER')
-                    ]))
+                norm_coords = [((x - min_x) * scale + 25, (y - min_y) * scale + 25) for x, y in coords]
 
-                    story.append(coord_table)
-                    story.append(Spacer(1, 20))
+                poly = RLPolygon(norm_coords, strokeColor=colors.blue, fillColor=None, strokeWidth=1)
+                drawing.add(poly)
 
-                    story.append(Paragraph("<i>Map image not included due to pydeck limitations. Consider exporting separately.</i>", styles['Normal']))
+                # Draw beacon points
+                for idx, (x, y) in enumerate(norm_coords):
+                    drawing.add(Line(x-2, y-2, x+2, y+2, strokeColor=colors.red))
+                    drawing.add(Line(x-2, y+2, x+2, y-2, strokeColor=colors.red))
+                    drawing.add(String(x+3, y+3, str(idx+1), fontSize=8, fillColor=colors.black))
 
-                    doc.build(story)
-                    buffer.seek(0)
-                    st.download_button("⬇️ Download Sketch Plan", buffer, file_name=pdf_file, mime="application/pdf")
+                story.append(drawing)
 
-                except Exception as e:
-                    st.error(f"PDF error: {e}")
+                # Add coordinate table
+                table_data = [["Point", "Easting", "Northing"]]
+                for idx, (xe, yn) in enumerate(coords):
+                    table_data.append([str(idx+1), f"{xe:.2f}", f"{yn:.2f}"])
+
+                coord_table = Table(table_data, colWidths=[60, 120, 120])
+                coord_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                    ('GRID', (0,0), (-1,-1), 1, colors.black),
+                    ('ALIGN', (0,0), (-1,-1), 'CENTER')
+                ]))
+
+                story.append(Spacer(1, 20))
+                story.append(coord_table)
+
+                doc.build(story)
+                buffer.seek(0)
+                st.download_button("⬇️ Download Sketch Plan", buffer, file_name="parcel_sketch_plan.pdf", mime="application/pdf")
+
+            except Exception as e:
+                st.error(f"PDF error: {e}")
