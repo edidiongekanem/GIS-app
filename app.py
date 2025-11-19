@@ -9,7 +9,6 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.graphics.shapes import Drawing, Line, String
-from reportlab.graphics import renderPDF
 from math import atan2, degrees, sqrt
 import io
 
@@ -67,21 +66,19 @@ elif tool == "Parcel Plotter":
             st.success(f"✅ Parcel plotted successfully! Area: {st.session_state.parcel_area:,.2f} m²")
 
     if st.session_state.parcel_plotted:
-        if st.button("📄 Print Computation Sheet"):
+        # --- Draw Sketch Plan PDF ---
+        if st.button("📄 Print Sketch Plan"):
             try:
                 buffer = io.BytesIO()
                 doc = SimpleDocTemplate(buffer, pagesize=A4)
                 styles = getSampleStyleSheet()
                 story = []
 
-                story.append(Paragraph("<b>Parcel Computation Sheet</b>", styles['Title']))
-                story.append(Spacer(1, 12))
-                story.append(Paragraph(f"<b>Total Area:</b> {st.session_state.parcel_area:,.2f} m²", styles['Normal']))
+                story.append(Paragraph("<b>Parcel Sketch Plan</b>", styles['Title']))
                 story.append(Spacer(1, 12))
 
                 coords = st.session_state.utm_coords
 
-                # Draw sketch plan using lines
                 drawing = Drawing(400, 400)
                 xs, ys = zip(*coords)
                 min_x, max_x = min(xs), max(xs)
@@ -105,9 +102,26 @@ elif tool == "Parcel Plotter":
                 story.append(drawing)
                 story.append(Spacer(1, 12))
 
-                # Compute distances and bearings
-                table_data = [["Point ID", "Easting", "Northing", "Distance (m)", "Bearing (°)"]]
-                n = len(coords)-1
+                doc.build(story)
+                buffer.seek(0)
+                st.download_button("⬇️ Download Sketch Plan", buffer, file_name="parcel_sketch_plan.pdf", mime="application/pdf")
+
+        # --- Computation Sheet PDF ---
+        if st.button("📄 Print Computation Sheet"):
+            try:
+                buffer = io.BytesIO()
+                doc = SimpleDocTemplate(buffer, pagesize=A4)
+                styles = getSampleStyleSheet()
+                story = []
+
+                story.append(Paragraph("<b>Parcel Computation Sheet</b>", styles['Title']))
+                story.append(Spacer(1, 12))
+                story.append(Paragraph(f"<b>Total Area:</b> {st.session_state.parcel_area:,.2f} m²", styles['Normal']))
+                story.append(Spacer(1, 12))
+
+                coords = st.session_state.utm_coords
+
+                table_data = [["Point ID", "Easting", "Northing", "Distance (m)", "Bearing (°)", "Angle (°)"]]
 
                 def compute_distance(p1, p2):
                     return sqrt((p2[0]-p1[0])**2 + (p2[1]-p1[1])**2)
@@ -116,14 +130,24 @@ elif tool == "Parcel Plotter":
                     angle = degrees(atan2(p2[0]-p1[0], p2[1]-p1[1]))
                     return (angle + 360) % 360
 
+                n = len(coords) - 1
+                bearings = []
                 for i in range(n):
                     p1 = coords[i]
                     p2 = coords[i+1]
                     dist = compute_distance(p1, p2)
                     bearing = compute_bearing(p1, p2)
-                    table_data.append([str(i+1), f"{p1[0]:.2f}", f"{p1[1]:.2f}", f"{dist:.2f}", f"{bearing:.2f}"])
+                    bearings.append(bearing)
+                    table_data.append([str(i+1), f"{p1[0]:.2f}", f"{p1[1]:.2f}", f"{dist:.2f}", f"{bearing:.2f}", ""]) 
 
-                coord_table = Table(table_data, colWidths=[50, 120, 120, 80, 80])
+                # Compute internal angles
+                for i in range(1, n):
+                    b1 = bearings[i-1]
+                    b2 = bearings[i]
+                    angle = (b2 - b1) % 360
+                    table_data[i][5] = f"{angle:.2f}"
+
+                coord_table = Table(table_data, colWidths=[50, 90, 90, 80, 80, 60])
                 coord_table.setStyle(TableStyle([
                     ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
                     ('GRID', (0,0), (-1,-1), 1, colors.black),
