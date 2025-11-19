@@ -4,7 +4,7 @@ from shapely.geometry import Point, Polygon
 from pyproj import Transformer
 import pydeck as pdk
 import json
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -114,8 +114,6 @@ elif tool == "Parcel Plotter":
         st.session_state.parcel_plotted = False
     if "parcel_area" not in st.session_state:
         st.session_state.parcel_area = 0
-    if "parcel_map" not in st.session_state:
-        st.session_state.parcel_map = None
 
     st.header("📐 Parcel Boundary Plotter (UTM Coordinates)")
     st.write("Enter UTM Easting/Northing (Zone 32N, meters).")
@@ -175,21 +173,20 @@ elif tool == "Parcel Plotter":
                 polygon.centroid.y
             )
 
-            deck_map = pdk.Deck(
-                layers=[polygon_layer, point_layer],
-                initial_view_state=pdk.ViewState(
-                    longitude=centroid_lon,
-                    latitude=centroid_lat,
-                    zoom=17
-                ),
-                map_style=None
+            st.pydeck_chart(
+                pdk.Deck(
+                    layers=[polygon_layer, point_layer],
+                    initial_view_state=pdk.ViewState(
+                        longitude=centroid_lon,
+                        latitude=centroid_lat,
+                        zoom=17
+                    ),
+                    map_style=None
+                )
             )
 
-            st.session_state.parcel_map = deck_map
-            st.pydeck_chart(deck_map)
-
     # --- PRINT OPTIONS AFTER PLOT ---
-    if st.session_state.parcel_plotted and st.session_state.parcel_map:
+    if st.session_state.parcel_plotted:
         colA, colB = st.columns(2)
 
         with colA:
@@ -220,12 +217,7 @@ elif tool == "Parcel Plotter":
                     story.append(coord_table)
                     story.append(Spacer(1, 20))
 
-                    img_data = st.session_state.parcel_map.to_image()
-                    img_buffer = io.BytesIO()
-                    img_data.save(img_buffer, format='PNG')
-                    img_buffer.seek(0)
-
-                    story.append(Image(img_buffer, width=400, height=400))
+                    story.append(Paragraph("<i>Map image not included due to pydeck limitations. Consider exporting separately.</i>", styles['Normal']))
 
                     doc.build(story)
                     buffer.seek(0)
