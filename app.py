@@ -1,83 +1,114 @@
 import streamlit as st
 import geopandas as gpd
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point
 from pyproj import Transformer
 import pydeck as pdk
 import json
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Flowable
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.pagesizes import A4
-from reportlab.lib import colors
-from reportlab.pdfgen import canvas
-from math import atan2, degrees, sqrt
-import io
 
-class DrawPolygon(Flowable):
-    def __init__(self, coords, width=400, height=400):
-        super().__init__()
-        self.coords = coords
-        self.width = width
-        self.height = height
+# ------------------------
+# Streamlit page config
+# ------------------------
+st.set_page_config(page_title="Offline Nigeria LGA Finder", layout="centered")
 
-    def draw(self):
-        if not self.coords:
-            return
-        xs = [c[0] for c in self.coords]
-        ys = [c[1] for c in self.coords]
-        min_x, max_x = min(xs), max(xs)
-        min_y, max_y = min(ys), max(ys)
-        scale_x = self.width / (max_x - min_x) if max_x - min_x else 1
-        scale_y = self.height / (max_y - min_y) if max_y - min_y else 1
-        scale = min(scale_x, scale_y) * 0.8
-        offset_x = (self.width - (max_x - min_x) * scale) / 2
-        offset_y = (self.height - (max_y - min_y) * scale) / 2
-        scaled_coords = [((x - min_x) * scale + offset_x, (y - min_y) * scale + offset_y) for x, y in self.coords]
-        self.canv.setStrokeColor(colors.black)
-        self.canv.setLineWidth(1)
-        for i in range(len(scaled_coords)-1):
-            self.canv.line(scaled_coords[i][0], scaled_coords[i][1], scaled_coords[i+1][0], scaled_coords[i+1][1])
-        # Close the polygon
-        self.canv.line(scaled_coords[-1][0], scaled_coords[-1][1], scaled_coords[0][0], scaled_coords[0][1])
+# ------------------------
+# Load GeoJSON data
+# ------------------------
+@st.cache_resource
+def load_lga_data():
+    gdf = gpd.read_file("NGA_LGA_Boundaries_2_-2954311847614747693.geojson")
+    return gdf
 
-st.set_page_config(page_title="Geo Tools Suite", layout="centered")
-st.title("🌍 Geo Tools Suite")
+lga_gdf = load_lga_data()
 
-tool = st.sidebar.selectbox("Select a Tool", ["🏠 Home", "Nigeria LGA Finder", "Parcel Plotter"])
+# ------------------------
+# App header
+# ------------------------
+st.title("🗺️ Nigeria LGA Finder")
+st.write("Enter **Easting/Northing (meters)** in your projected CRS to find the LGA.")
 
-if tool == "Parcel Plotter":
+# ------------------------
+# User input
+# ------------------------
+E = st.number_input("Easting (m)", format="%.2f")
+N = st.number_input("Northing (m)", format="%.2f")
 
-    if "parcel_plotted" not in st.session_state:
-        st.session_state.parcel_plotted = False
-    if "parcel_area" not in st.session_state:
-        st.session_state.parcel_area = 0
+# ------------------------
+# CRS transformation
+# ------------------------
+projected_crs = "EPSG:32632"  # Replace with your CRS
+transformer = Transformer.from_crs(projected_crs, "EPSG:4326", always_xy=True)
 
-    st.header("📐 Parcel Boundary Plotter (UTM Coordinates)")
-    num_points = st.number_input("Number of beacons:", min_value=3, step=1)
+# ------------------------
+# Main functionality
+# ------------------------
+if st.button("Find LGA"):
+    # Convert meters to lat/lon
+    lon, lat = transformer.transform(E, N)
+    point = Point(lon, lat)
 
-    utm_coords = []
-    if num_points > 0:
-        for i in range(num_points):
-            col1, col2 = st.columns(2)
-            e = col1.number_input(f"Point {i+1} → Easting (m)", key=f"e{i}", format="%.2f")
-            n = col2.number_input(f"Point {i+1} → Northing (m)", key=f"n{i}", format="%.2f")
-            utm_coords.append((e, n))
+    # Find which LGA contains the point
+    match = lga_gdf[lga_gdf.contains(point)]
 
-    if st.button("Plot Parcel"):
-        if utm_coords[0] != utm_coords[-1]:
-            utm_coords.append(utm_coords[0])
-        st.session_state.parcel_plotted = True
-        st.session_state.utm_coords = utm_coords
+    if not match.empty:
+        # Get LGA name (first column containing "NAME")
+        name_cols = [c for c in match.columns if "NAME" in c.upper()]
+        lga_name = match.iloc[0][name_cols[0]] if name_cols else "Unknown"
 
-        polygon = Polygon(utm_coords)
-        st.session_state.parcel_area = polygon.area
-        st.success(f"✅ Parcel plotted successfully! Area: {st.session_state.parcel_area:,.2f} m²")
+        st.success(f"✅ The coordinate is in **{lga_name} LGA**.")
 
-    if st.session_state.parcel_plotted:
-        col1, col2 = st.columns(2)
+        # ------------------------
+        # Prepare polygon data for Pydeck
+        # ------------------------
+        geojson_dict = json.loads(match.to_json())
+        polygon_data = []
+        for feature in geojson_dict["features"]:
+            geom_type = feature["geometry"]["type"]
+            coords = feature["geometry"]["coordinates"]
+            if geom_type == "Polygon":
+                polygon_data.append({"coordinates": coords})
+            elif geom_type == "MultiPolygon":
+                for poly in coords:
+                    polygon_data.append({"coordinates": poly})
 
-        # Sketch Plan PDF with actual polygon coordinates
-        sketch_buffer = io.BytesIO()
-        story = [Paragraph("<b>Parcel Sketch Plan</b>", getSampleStyleSheet()['Title']), Spacer(1,12), DrawPolygon(st.session_state.utm_coords)]
-        SimpleDocTemplate(sketch_buffer, pagesize=A4).build(story)
-        sketch_buffer.seek(0)
-        col1.download_button("📄 Print Sketch Plan", data=sketch_buffer.getvalue(), file_name="parcel_sketch_plan.pdf", mime="application/pdf")
+        # ------------------------
+        # Create Pydeck layers
+        # ------------------------
+        polygon_layer = pdk.Layer(
+            "PolygonLayer",
+            polygon_data,
+            get_polygon="coordinates",
+            get_fill_color="[0, 100, 255, 60]",
+            get_line_color="[0, 50, 200]",
+            pickable=False,
+            extruded=False,
+            stroked=True,
+        )
+
+        point_layer = pdk.Layer(
+            "ScatterplotLayer",
+            [{"lon": lon, "lat": lat}],
+            get_position="[lon, lat]",
+            get_color="[255, 0, 0]",
+            get_radius=300,
+        )
+
+        view_state = pdk.ViewState(
+            longitude=lon,
+            latitude=lat,
+            zoom=8,
+            pitch=0,
+        )
+
+        st.subheader("📍 LGA Boundary Map")
+        st.pydeck_chart(
+            pdk.Deck(
+                layers=[polygon_layer, point_layer],
+                initial_view_state=view_state,
+                map_style=None  # Offline-ready
+            )
+        )
+
+    else:
+        st.error("❌ No LGA found for this coordinate.")
+
+
