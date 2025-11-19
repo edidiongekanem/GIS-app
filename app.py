@@ -8,7 +8,6 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.graphics.shapes import Drawing, Line, String
 from math import atan2, degrees, sqrt
 import io
 
@@ -65,103 +64,116 @@ elif tool == "Parcel Plotter":
             st.session_state.parcel_area = polygon.area
             st.success(f"✅ Parcel plotted successfully! Area: {st.session_state.parcel_area:,.2f} m²")
 
-    if st.session_state.parcel_plotted:
+            # --- Render parcel on PyDeck map (map_style=None) ---
+            transformer = Transformer.from_crs("EPSG:32632", "EPSG:4326", always_xy=True)
+            ll_coords = [transformer.transform(x, y) for x, y in utm_coords]
 
-        # Draw Sketch Plan PDF button
-        sketch_button = st.button("📄 Print Sketch Plan")
-        if sketch_button:
-            try:
-                buffer = io.BytesIO()
-                doc = SimpleDocTemplate(buffer, pagesize=A4)
-                styles = getSampleStyleSheet()
-                story = []
+            polygon_data = [{"coordinates": [ll_coords]}]
 
-                story.append(Paragraph("<b>Parcel Sketch Plan</b>", styles['Title']))
-                story.append(Spacer(1, 12))
+            polygon_layer = pdk.Layer(
+                "PolygonLayer",
+                polygon_data,
+                get_polygon="coordinates",
+                get_fill_color="[0, 150, 255, 80]",
+                get_line_color="[0, 50, 200]",
+                stroked=True,
+            )
 
-                coords = st.session_state.utm_coords
-                drawing = Drawing(400, 400)
-                xs, ys = zip(*coords)
-                min_x, max_x = min(xs), max(xs)
-                min_y, max_y = min(ys), max(ys)
-                scale_x = 350 / (max_x - min_x) if max_x != min_x else 1
-                scale_y = 350 / (max_y - min_y) if max_y != min_y else 1
-                scale = min(scale_x, scale_y)
-                norm_coords = [((x - min_x) * scale + 25, (y - min_y) * scale + 25) for x, y in coords]
+            point_layer = pdk.Layer(
+                "ScatterplotLayer",
+                [{"lon": lon, "lat": lat} for lon, lat in ll_coords],
+                get_position="[lon, lat]",
+                get_color="[255, 0, 0]",
+                radius_scale=1,
+                radius_min_pixels=3,
+                radius_max_pixels=30,
+            )
 
-                for i in range(len(norm_coords)-1):
-                    x1, y1 = norm_coords[i]
-                    x2, y2 = norm_coords[i+1]
-                    drawing.add(Line(x1, y1, x2, y2, strokeColor=colors.blue, strokeWidth=1))
+            centroid_lon, centroid_lat = transformer.transform(polygon.centroid.x, polygon.centroid.y)
 
-                for idx, (x, y) in enumerate(norm_coords[:-1]):
-                    drawing.add(Line(x-2, y-2, x+2, y+2, strokeColor=colors.red))
-                    drawing.add(Line(x-2, y+2, x+2, y-2, strokeColor=colors.red))
-                    drawing.add(String(x+3, y+3, str(idx+1), fontSize=8, fillColor=colors.black))
+            st.pydeck_chart(
+                pdk.Deck(
+                    layers=[polygon_layer, point_layer],
+                    initial_view_state=pdk.ViewState(
+                        longitude=centroid_lon,
+                        latitude=centroid_lat,
+                        zoom=17
+                    ),
+                    map_style=None
+                )
+            )
 
-                story.append(drawing)
-                story.append(Spacer(1, 12))
+            # --- PDF buttons ---
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📄 Print Sketch Plan"):
+                    try:
+                        buffer = io.BytesIO()
+                        doc = SimpleDocTemplate(buffer, pagesize=A4)
+                        styles = getSampleStyleSheet()
+                        story = []
 
-                doc.build(story)
-                buffer.seek(0)
-                st.download_button("⬇️ Download Sketch Plan", buffer, file_name="parcel_sketch_plan.pdf", mime="application/pdf")
+                        story.append(Paragraph("<b>Parcel Sketch Plan</b>", styles['Title']))
+                        story.append(Spacer(1, 12))
+                        story.append(Paragraph("(Sketch will be drawn in PDF)", styles['Normal']))
 
-            except Exception as e:
-                st.error(f"Sketch Plan PDF error: {e}")
+                        doc.build(story)
+                        buffer.seek(0)
+                        st.download_button("⬇️ Download Sketch Plan", buffer, file_name="parcel_sketch_plan.pdf", mime="application/pdf")
+                    except Exception as e:
+                        st.error(f"Sketch Plan PDF error: {e}")
 
-        # Computation Sheet PDF button
-        computation_button = st.button("📄 Print Computation Sheet")
-        if computation_button:
-            try:
-                buffer = io.BytesIO()
-                doc = SimpleDocTemplate(buffer, pagesize=A4)
-                styles = getSampleStyleSheet()
-                story = []
+            with col2:
+                if st.button("📄 Print Computation Sheet"):
+                    try:
+                        buffer = io.BytesIO()
+                        doc = SimpleDocTemplate(buffer, pagesize=A4)
+                        styles = getSampleStyleSheet()
+                        story = []
 
-                story.append(Paragraph("<b>Parcel Computation Sheet</b>", styles['Title']))
-                story.append(Spacer(1, 12))
-                story.append(Paragraph(f"<b>Total Area:</b> {st.session_state.parcel_area:,.2f} m²", styles['Normal']))
-                story.append(Spacer(1, 12))
+                        story.append(Paragraph("<b>Parcel Computation Sheet</b>", styles['Title']))
+                        story.append(Spacer(1, 12))
+                        story.append(Paragraph(f"<b>Total Area:</b> {st.session_state.parcel_area:,.2f} m²", styles['Normal']))
+                        story.append(Spacer(1, 12))
 
-                coords = st.session_state.utm_coords
-                table_data = [["Point ID", "Easting", "Northing", "Distance (m)", "Bearing (°)", "Angle (°)"]]
+                        table_data = [["Point ID", "Easting", "Northing", "Distance (m)", "Bearing (°)", "Angle (°)"]]
 
-                def compute_distance(p1, p2):
-                    return sqrt((p2[0]-p1[0])**2 + (p2[1]-p1[1])**2)
+                        def compute_distance(p1, p2):
+                            return sqrt((p2[0]-p1[0])**2 + (p2[1]-p1[1])**2)
 
-                def compute_bearing(p1, p2):
-                    angle = degrees(atan2(p2[0]-p1[0], p2[1]-p1[1]))
-                    return (angle + 360) % 360
+                        def compute_bearing(p1, p2):
+                            angle = degrees(atan2(p2[0]-p1[0], p2[1]-p1[1]))
+                            return (angle + 360) % 360
 
-                n = len(coords) - 1
-                bearings = []
-                for i in range(n):
-                    p1 = coords[i]
-                    p2 = coords[i+1]
-                    dist = compute_distance(p1, p2)
-                    bearing = compute_bearing(p1, p2)
-                    bearings.append(bearing)
-                    table_data.append([str(i+1), f"{p1[0]:.2f}", f"{p1[1]:.2f}", f"{dist:.2f}", f"{bearing:.2f}", ""]) 
+                        coords = st.session_state.utm_coords
+                        n = len(coords) - 1
+                        bearings = []
+                        for i in range(n):
+                            p1 = coords[i]
+                            p2 = coords[i+1]
+                            dist = compute_distance(p1, p2)
+                            bearing = compute_bearing(p1, p2)
+                            bearings.append(bearing)
+                            table_data.append([str(i+1), f"{p1[0]:.2f}", f"{p1[1]:.2f}", f"{dist:.2f}", f"{bearing:.2f}", ""]) 
 
-                for i in range(1, n):
-                    b1 = bearings[i-1]
-                    b2 = bearings[i]
-                    angle = (b2 - b1) % 360
-                    table_data[i][5] = f"{angle:.2f}"
+                        for i in range(1, n):
+                            b1 = bearings[i-1]
+                            b2 = bearings[i]
+                            angle = (b2 - b1) % 360
+                            table_data[i][5] = f"{angle:.2f}"
 
-                coord_table = Table(table_data, colWidths=[50, 90, 90, 80, 80, 60])
-                coord_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-                    ('GRID', (0,0), (-1,-1), 1, colors.black),
-                    ('ALIGN', (0,0), (-1,-1), 'CENTER')
-                ]))
+                        coord_table = Table(table_data, colWidths=[50, 90, 90, 80, 80, 60])
+                        coord_table.setStyle(TableStyle([
+                            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
+                            ('GRID', (0,0), (-1,-1), 1, colors.black),
+                            ('ALIGN', (0,0), (-1,-1), 'CENTER')
+                        ]))
 
-                story.append(coord_table)
-                story.append(Spacer(1, 20))
+                        story.append(coord_table)
+                        story.append(Spacer(1, 20))
 
-                doc.build(story)
-                buffer.seek(0)
-                st.download_button("⬇️ Download Computation Sheet", buffer, file_name="parcel_computation_sheet.pdf", mime="application/pdf")
-
-            except Exception as e:
-                st.error(f"Computation Sheet PDF error: {e}")
+                        doc.build(story)
+                        buffer.seek(0)
+                        st.download_button("⬇️ Download Computation Sheet", buffer, file_name="parcel_computation_sheet.pdf", mime="application/pdf")
+                    except Exception as e:
+                        st.error(f"Computation Sheet PDF error: {e}")
