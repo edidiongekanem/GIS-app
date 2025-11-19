@@ -114,6 +114,8 @@ elif tool == "Parcel Plotter":
         st.session_state.parcel_plotted = False
     if "parcel_area" not in st.session_state:
         st.session_state.parcel_area = 0
+    if "parcel_map" not in st.session_state:
+        st.session_state.parcel_map = None
 
     st.header("📐 Parcel Boundary Plotter (UTM Coordinates)")
     st.write("Enter UTM Easting/Northing (Zone 32N, meters).")
@@ -173,7 +175,7 @@ elif tool == "Parcel Plotter":
                 polygon.centroid.y
             )
 
-            r = pdk.Deck(
+            deck_map = pdk.Deck(
                 layers=[polygon_layer, point_layer],
                 initial_view_state=pdk.ViewState(
                     longitude=centroid_lon,
@@ -183,10 +185,11 @@ elif tool == "Parcel Plotter":
                 map_style=None
             )
 
-            st.pydeck_chart(r)
+            st.session_state.parcel_map = deck_map
+            st.pydeck_chart(deck_map)
 
     # --- PRINT OPTIONS AFTER PLOT ---
-    if st.session_state.parcel_plotted:
+    if st.session_state.parcel_plotted and st.session_state.parcel_map:
         colA, colB = st.columns(2)
 
         with colA:
@@ -217,7 +220,7 @@ elif tool == "Parcel Plotter":
                     story.append(coord_table)
                     story.append(Spacer(1, 20))
 
-                    img_data = r.to_image()
+                    img_data = st.session_state.parcel_map.to_image()
                     img_buffer = io.BytesIO()
                     img_data.save(img_buffer, format='PNG')
                     img_buffer.seek(0)
@@ -227,50 +230,6 @@ elif tool == "Parcel Plotter":
                     doc.build(story)
                     buffer.seek(0)
                     st.download_button("⬇️ Download Sketch Plan", buffer, file_name=pdf_file, mime="application/pdf")
-
-                except Exception as e:
-                    st.error(f"PDF error: {e}")
-
-        with colB:
-            if st.button("📊 Print Computation Sheet"):
-                try:
-                    pdf_file = "parcel_computation_sheet.pdf"
-                    buffer = io.BytesIO()
-                    doc = SimpleDocTemplate(buffer, pagesize=A4)
-                    styles = getSampleStyleSheet()
-                    story = []
-
-                    story.append(Paragraph("<b>Parcel Computation Sheet</b>", styles['Title']))
-                    story.append(Spacer(1, 12))
-                    story.append(Paragraph(f"<b>Total Area:</b> {st.session_state.parcel_area:,.2f} m²", styles['Heading2']))
-                    story.append(Spacer(1, 15))
-
-                    comp_data = [["Line", "Start", "End", "Distance (m)", "Bearing (°)", "Angle (°)"]]
-                    coords = st.session_state.utm_coords
-                    n = len(coords)
-                    for i in range(n-1):
-                        x1, y1 = coords[i]
-                        x2, y2 = coords[i+1]
-                        dx = x2 - x1
-                        dy = y2 - y1
-                        distance = sqrt(dx*dx + dy*dy)
-                        bearing = (degrees(atan2(dx, dy)) + 360) % 360
-                        angle = "-"
-                        comp_data.append([f"L{i+1}", f"P{i+1}", f"P{i+2}", f"{distance:.2f}", f"{bearing:.2f}", angle])
-
-                    comp_table = Table(comp_data, colWidths=[50,50,50,90,80,60])
-                    comp_table.setStyle(TableStyle([
-                        ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-                        ('GRID', (0,0), (-1,-1), 1, colors.black),
-                        ('ALIGN', (0,0), (-1,-1), 'CENTER')
-                    ]))
-
-                    story.append(comp_table)
-                    story.append(Spacer(1, 20))
-
-                    doc.build(story)
-                    buffer.seek(0)
-                    st.download_button("⬇️ Download Computation Sheet", buffer, file_name=pdf_file, mime="application/pdf")
 
                 except Exception as e:
                     st.error(f"PDF error: {e}")
