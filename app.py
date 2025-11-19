@@ -8,7 +8,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.graphics.shapes import Drawing, Polygon as RLPolygon, Line, String
+from reportlab.graphics.shapes import Drawing, Line, String
 from reportlab.graphics import renderPDF
 from math import atan2, degrees, sqrt
 import io
@@ -79,11 +79,10 @@ elif tool == "Parcel Plotter":
                 story.append(Paragraph(f"<b>Area:</b> {st.session_state.parcel_area:,.2f} m²", styles['Normal']))
                 story.append(Spacer(1, 12))
 
-                # Draw the polygon
+                # Draw the polygon using lines instead of RLPolygon
                 drawing = Drawing(400, 400)
                 coords = st.session_state.utm_coords
 
-                # Normalize coordinates to fit the drawing box
                 xs, ys = zip(*coords)
                 min_x, max_x = min(xs), max(xs)
                 min_y, max_y = min(ys), max(ys)
@@ -93,11 +92,14 @@ elif tool == "Parcel Plotter":
 
                 norm_coords = [((x - min_x) * scale + 25, (y - min_y) * scale + 25) for x, y in coords]
 
-                poly = RLPolygon(norm_coords, strokeColor=colors.blue, fillColor=None, strokeWidth=1)
-                drawing.add(poly)
+                # Draw edges
+                for i in range(len(norm_coords)-1):
+                    x1, y1 = norm_coords[i]
+                    x2, y2 = norm_coords[i+1]
+                    drawing.add(Line(x1, y1, x2, y2, strokeColor=colors.blue, strokeWidth=1))
 
                 # Draw beacon points
-                for idx, (x, y) in enumerate(norm_coords):
+                for idx, (x, y) in enumerate(norm_coords[:-1]):  # skip last repeated point
                     drawing.add(Line(x-2, y-2, x+2, y+2, strokeColor=colors.red))
                     drawing.add(Line(x-2, y+2, x+2, y-2, strokeColor=colors.red))
                     drawing.add(String(x+3, y+3, str(idx+1), fontSize=8, fillColor=colors.black))
@@ -106,7 +108,7 @@ elif tool == "Parcel Plotter":
 
                 # Add coordinate table
                 table_data = [["Point", "Easting", "Northing"]]
-                for idx, (xe, yn) in enumerate(coords):
+                for idx, (xe, yn) in enumerate(coords[:-1]):
                     table_data.append([str(idx+1), f"{xe:.2f}", f"{yn:.2f}"])
 
                 coord_table = Table(table_data, colWidths=[60, 120, 120])
