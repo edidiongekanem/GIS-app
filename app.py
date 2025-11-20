@@ -4,129 +4,80 @@ from shapely.geometry import Point, Polygon
 from pyproj import Transformer
 import pydeck as pdk
 import json
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Flowable
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.pdfgen import canvas
+from math import atan2, degrees, sqrt
+import io
+
+class DrawPolygon(Flowable):
+    def __init__(self, coords, width=400, height=400):
+        super().__init__()
+        self.coords = coords
+        self.width = width
+        self.height = height
+
+    def draw(self):
+        # Ensure polygon exists
+        if not self.coords or len(self.coords) < 3:
+            return
+
+        # Extract UTM coordinates
+        xs = [c[0] for c in self.coords]
+        ys = [c[1] for c in self.coords]
+
+        min_x, max_x = min(xs), max(xs)
+        min_y, max_y = min(ys), max(ys)
+
+        # Normalize (shift polygon to local origin)
+        norm_coords = [(x - min_x, y - min_y) for x, y in self.coords]
+
+        width_range = max_x - min_x
+        height_range = max_y - min_y
+
+        if width_range == 0:
+            width_range = 1
+        if height_range == 0:
+            height_range = 1
+
+        # Scale
+        scale_x = self.width / width_range
+        scale_y = self.height / height_range
+        scale = min(scale_x, scale_y) * 0.90
+
+        scaled_coords = [
+            (x * scale, y * scale) for x, y in norm_coords
+        ]
+
+        self.canv.setStrokeColor(colors.black)
+        self.canv.setLineWidth(2)
+
+        # Draw polygon edges
+        for i in range(len(scaled_coords) - 1):
+            x1, y1 = scaled_coords[i]
+            x2, y2 = scaled_coords[i + 1]
+            self.canv.line(x1, y1, x2, y2)
+
+        # Close polygon
+        x1, y1 = scaled_coords[-1]
+        x2, y2 = scaled_coords[0]
+        self.canv.line(x1, y1, x2, y2)
 
 st.set_page_config(page_title="Geo Tools Suite", layout="centered")
-
-# =========================================================
-#                   LANDING PAGE MENU
-# =========================================================
-
 st.title("🌍 Geo Tools Suite")
 
-tool = st.sidebar.selectbox(
-    "Select a Tool",
-    ["🏠 Home", "Nigeria LGA Finder", "Parcel Plotter"]
-)
+tool = st.sidebar.selectbox("Select a Tool", ["🏠 Home", "Nigeria LGA Finder", "Parcel Plotter"])
 
-if tool == "🏠 Home":
-    st.header("Welcome!")
-    st.write("""
-    Select any of the tools from the sidebar:
-    
-    ### 🗺️ Nigeria LGA Finder  
-    Enter Easting/Northing and find which LGA the point belongs to.
-    
-    ### 📐 Parcel Plotter  
-    Input coordinates, plot a parcel boundary and calculate the area.
-    """)
+if tool == "Parcel Plotter":
 
-
-# =========================================================
-#                   NIGERIA LGA FINDER
-# =========================================================
-elif tool == "Nigeria LGA Finder":
-
-    st.header("🗺️ Nigeria LGA Finder (Offline)")
-
-    @st.cache_resource
-    def load_lga_data():
-        return gpd.read_file("NGA_LGA_Boundaries_2_-2954311847614747693.geojson")
-
-    lga_gdf = load_lga_data()
-
-    E = st.number_input("Easting (m)", format="%.2f")
-    N = st.number_input("Northing (m)", format="%.2f")
-
-    projected_crs = "EPSG:32632"
-    transformer = Transformer.from_crs(projected_crs, "EPSG:4326", always_xy=True)
-
-    if st.button("Find LGA"):
-
-        lon, lat = transformer.transform(E, N)
-        point = Point(lon, lat)
-
-        match = lga_gdf[lga_gdf.contains(point)]
-
-        if not match.empty:
-            name_cols = [c for c in match.columns if "NAME" in c.upper()]
-            lga_name = match.iloc[0][name_cols[0]] if name_cols else "Unknown"
-
-            st.success(f"✅ This coordinate is inside **{lga_name} LGA**")
-
-            # --- Polygon Data ---
-            geojson_dict = json.loads(match.to_json())
-            polygon_data = []
-
-            for feat in geojson_dict["features"]:
-                t = feat["geometry"]["type"]
-                coords = feat["geometry"]["coordinates"]
-
-                if t == "Polygon":
-                    polygon_data.append({"coordinates": coords})
-                elif t == "MultiPolygon":
-                    for poly in coords:
-                        polygon_data.append({"coordinates": poly})
-
-            polygon_layer = pdk.Layer(
-                "PolygonLayer",
-                polygon_data,
-                get_polygon="coordinates",
-                get_fill_color="[0, 120, 255, 60]",
-                get_line_color="[0, 80, 200]",
-                stroked=True,
-            )
-
-            # INTERACTIVE ZOOM-SCALING POINT MARKER
-            point_layer = pdk.Layer(
-                "ScatterplotLayer",
-                [{"lon": lon, "lat": lat}],
-                get_position="[lon, lat]",
-                get_color="[255, 0, 0]",
-                radius_scale=1,
-                radius_min_pixels=5,
-                radius_max_pixels=40,
-            )
-
-            centroid = Point(lon, lat)
-
-            st.pydeck_chart(
-                pdk.Deck(
-                    layers=[polygon_layer, point_layer],
-                    initial_view_state=pdk.ViewState(
-                        latitude=centroid.y,
-                        longitude=centroid.x,
-                        zoom=10
-                    ),
-                    map_style=None
-                )
-            )
-        else:
-            st.error("❌ No LGA found for this location.")
-
-
-
-# =========================================================
-#                      PARCEL PLOTTER
-# =========================================================
-elif tool == "Parcel Plotter":
+    if "parcel_plotted" not in st.session_state:
+        st.session_state.parcel_plotted = False
+    if "parcel_area" not in st.session_state:
+        st.session_state.parcel_area = 0
 
     st.header("📐 Parcel Boundary Plotter (UTM Coordinates)")
-    st.write("Enter UTM Easting/Northing (Zone 32N, meters).")
-
-    # CRS definitions
-    projected_crs = "EPSG:32632"    # UTM Zone 32N
-    transformer = Transformer.from_crs(projected_crs, "EPSG:4326", always_xy=True)
-
     num_points = st.number_input("Number of beacons:", min_value=3, step=1)
 
     utm_coords = []
@@ -138,69 +89,133 @@ elif tool == "Parcel Plotter":
             utm_coords.append((e, n))
 
     if st.button("Plot Parcel"):
+        if utm_coords[0] != utm_coords[-1]:
+            utm_coords.append(utm_coords[0])
+        st.session_state.parcel_plotted = True
+        st.session_state.utm_coords = utm_coords
 
-        try:
-            # Auto-close polygon
-            if utm_coords[0] != utm_coords[-1]:
-                utm_coords.append(utm_coords[0])
+        polygon = Polygon(utm_coords)
+        st.session_state.parcel_area = polygon.area
+        st.success(f"✅ Parcel plotted successfully! Area: {st.session_state.parcel_area:,.2f} m²")
 
-            # Build polygon in UTM for accurate area
-            polygon = Polygon(utm_coords)
+    if st.session_state.parcel_plotted:
+        col1, col2 = st.columns(2)
 
-            if not polygon.is_valid:
-                st.error("❌ Invalid boundary shape. Check point sequence.")
-            else:
+        # Pydeck Map Rendering with Point Labels
+        from pyproj import Transformer
+        transformer = Transformer.from_crs("EPSG:32632", "EPSG:4326", always_xy=True)
+        ll_coords = [transformer.transform(x, y) for x, y in st.session_state.utm_coords]
 
-                # AREA IN SQUARE METERS (correct, because UTM)
-                area = polygon.area
-                st.success("✅ Parcel plotted successfully!")
-                st.write(f"### Area: **{area:,.2f} m²**")
+        polygon_data = [{"coordinates": [ll_coords]}]
 
-                # Convert UTM → Lat/Lon for mapping
-                ll_coords = [transformer.transform(x, y) for x, y in utm_coords]
+        polygon_layer = pdk.Layer(
+            "PolygonLayer",
+            polygon_data,
+            get_polygon="coordinates",
+            get_fill_color="[0, 150, 255, 80]",
+            get_line_color="[0, 50, 200]",
+            stroked=True,
+        )
 
-                # Polygon for pydeck
-                polygon_data = [{
-                    "coordinates": [ll_coords]
-                }]
+        point_layer = pdk.Layer(
+            "ScatterplotLayer",
+            [{"lon": lon, "lat": lat} for lon, lat in ll_coords],
+            get_position="[lon, lat]",
+            get_color="[255, 0, 0]",
+            radius_scale=1,
+            radius_min_pixels=4,
+            radius_max_pixels=20,
+        )
 
-                polygon_layer = pdk.Layer(
-                    "PolygonLayer",
-                    polygon_data,
-                    get_polygon="coordinates",
-                    get_fill_color="[0, 150, 255, 80]",
-                    get_line_color="[0, 50, 200]",
-                    stroked=True,
-                )
+        label_data = [
+            {"lon": lon, "lat": lat, "text": f"P{i+1}"}
+            for i, (lon, lat) in enumerate(ll_coords)
+        ]
 
-                point_layer = pdk.Layer(
-                    "ScatterplotLayer",
-                    [{"lon": lon, "lat": lat} for lon, lat in ll_coords],
-                    get_position="[lon, lat]",
-                    get_color="[255, 0, 0]",
-                    radius_scale=1,
-                    radius_min_pixels=3,
-                    radius_max_pixels=30,
-                )
+        text_layer = pdk.Layer(
+            "TextLayer",
+            label_data,
+            get_position="[lon, lat]",
+            get_text="text",
+            get_size=16,
+            get_color="[0, 0, 0]",
+            billboard=True,
+        )
 
-                # Center on the polygon centroid
-                centroid_lon, centroid_lat = transformer.transform(
-                    polygon.centroid.x,
-                    polygon.centroid.y
-                )
+        centroid_x = sum([c[0] for c in ll_coords]) / len(ll_coords)
+        centroid_y = sum([c[1] for c in ll_coords]) / len(ll_coords)
 
-                # 🟦 SAME BASEMAP AS LGA FINDER (map_style=None)
-                st.pydeck_chart(
-                    pdk.Deck(
-                        layers=[polygon_layer, point_layer],
-                        initial_view_state=pdk.ViewState(
-                            longitude=centroid_lon,
-                            latitude=centroid_lat,
-                            zoom=17
-                        ),
-                        map_style=None  # <-- SAME BASEMAP
-                    )
-                )
+        st.pydeck_chart(
+            pdk.Deck(
+                layers=[polygon_layer, point_layer, text_layer],
+                initial_view_state=pdk.ViewState(
+                    longitude=centroid_x,
+                    latitude=centroid_y,
+                    zoom=18
+                ),
+                map_style=None
+            )
+        )
 
-        except Exception as e:
-            st.error(f"Error: {e}")
+        # Continue with Sketch Plan PDF sectionTransformer
+        transformer = Transformer.from_crs("EPSG:32632", "EPSG:4326", always_xy=True)
+        ll_coords = [transformer.transform(x, y) for x, y in st.session_state.utm_coords]
+
+        polygon_data = [{"coordinates": [ll_coords]}]
+
+        polygon_layer = pdk.Layer(
+            "PolygonLayer",
+            polygon_data,
+            get_polygon="coordinates",
+            get_fill_color="[0, 150, 255, 80]",
+            get_line_color="[0, 50, 200]",
+            stroked=True,
+        )
+
+        point_layer = pdk.Layer(
+            "ScatterplotLayer",
+            [{"lon": lon, "lat": lat} for lon, lat in ll_coords],
+            get_position="[lon, lat]",
+            get_color="[255, 0, 0]",
+            radius_scale=1,
+            radius_min_pixels=4,
+            radius_max_pixels=20,
+        )
+
+        # NEW — LABEL EACH POINT
+        label_data = [
+            {"lon": lon, "lat": lat, "text": f"P{i+1}"}
+            for i, (lon, lat) in enumerate(ll_coords)
+        ]
+
+        text_layer = pdk.Layer(
+            "TextLayer",
+            label_data,
+            get_position="[lon, lat]",
+            get_text="text",
+            get_size=16,
+            get_color="[0, 0, 0]",
+            billboard=True,
+        )
+
+        centroid_x = sum([c[0] for c in ll_coords]) / len(ll_coords)
+        centroid_y = sum([c[1] for c in ll_coords]) / len(ll_coords)
+
+        st.pydeck_chart(
+            pdk.Deck(
+                layers=[polygon_layer, point_layer, text_layer],
+                initial_view_state=pdk.ViewState(
+                    longitude=centroid_x,
+                    latitude=centroid_y,
+                    zoom=18
+                ),
+                map_style=None
+            )
+        )
+
+        # Sketch Plan P with actual polygon coordinates
+        sketch_buffer = io.BytesIO()
+        story = [Paragraph("<b>Parcel Sketch Plan</b>", getSampleStyleSheet()['Title']), Spacer(1,12), DrawPolygon(st.session_state.utm_coords)]
+        SimpleDocTemplate(sketch_buffer, pagesize=A4).build(story)
+        sketch_buffer.seek(0)
+        col1.download_button("📄 Print Sketch Plan", data=sketch_buffer.getvalue(), file_name="parcel_sketch_plan.pdf", mime="application/pdf")
