@@ -103,8 +103,7 @@ elif tool == "Nigeria LGA Finder":
                         latitude=lat,
                         longitude=lon,
                         zoom=10
-                    ),
-                    map_style=None
+                    )
                 )
             )
         else:
@@ -175,7 +174,7 @@ elif tool == "Parcel Plotter":
                     polygon.centroid.y
                 )
 
-                # --- Working Open-Source Satellite TileLayer ---
+                # --- Open-Source Satellite TileLayer (Carto Voyager) ---
                 tile_layer = pdk.Layer(
                     "TileLayer",
                     "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
@@ -186,6 +185,7 @@ elif tool == "Parcel Plotter":
                     pickable=False,
                 )
 
+                # Render Deck without setting map_style
                 st.pydeck_chart(
                     pdk.Deck(
                         layers=[tile_layer, polygon_layer, point_layer],
@@ -194,15 +194,9 @@ elif tool == "Parcel Plotter":
                             latitude=centroid_lat,
                             zoom=17,
                             pitch=0,
-                        ),
-                        
+                        )
                     )
                 )
 
         except Exception as e:
             st.error(f"Error: {e}")
-
-
-
-
-
