@@ -64,7 +64,6 @@ elif tool == "Nigeria LGA Finder":
 
             st.success(f"✅ This coordinate is inside **{lga_name} LGA**")
 
-            # --- Polygon Data ---
             geojson_dict = json.loads(match.to_json())
             polygon_data = []
 
@@ -120,7 +119,7 @@ elif tool == "Parcel Plotter":
     st.header("📐 Parcel Boundary Plotter (UTM Coordinates)")
     st.write("Enter UTM Easting/Northing (Zone 32N, meters).")
 
-    projected_crs = "EPSG:32632"    # UTM Zone 32N
+    projected_crs = "EPSG:32632"
     transformer = Transformer.from_crs(projected_crs, "EPSG:4326", always_xy=True)
 
     num_points = st.number_input("Number of beacons:", min_value=3, step=1)
@@ -144,12 +143,10 @@ elif tool == "Parcel Plotter":
             if not polygon.is_valid:
                 st.error("❌ Invalid boundary shape. Check point sequence.")
             else:
-
                 area = polygon.area
                 st.success("✅ Parcel plotted successfully!")
                 st.write(f"### Area: **{area:,.2f} m²**")
 
-                # Convert UTM → Lat/Lon
                 ll_coords = [transformer.transform(x, y) for x, y in utm_coords]
 
                 polygon_data = [{"coordinates": [ll_coords]}]
@@ -173,19 +170,19 @@ elif tool == "Parcel Plotter":
                     radius_max_pixels=30,
                 )
 
-                # Center on polygon centroid
                 centroid_lon, centroid_lat = transformer.transform(
                     polygon.centroid.x,
                     polygon.centroid.y
                 )
 
-                # --- Satellite TileLayer ---
+                # --- Working Open-Source Satellite TileLayer ---
                 tile_layer = pdk.Layer(
                     "TileLayer",
-                    "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+                    "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
                     min_zoom=0,
                     max_zoom=19,
                     tile_size=256,
+                    render_sub_layers=True,
                     pickable=False,
                 )
 
@@ -195,12 +192,12 @@ elif tool == "Parcel Plotter":
                         initial_view_state=pdk.ViewState(
                             longitude=centroid_lon,
                             latitude=centroid_lat,
-                            zoom=17
+                            zoom=17,
+                            pitch=0,
                         ),
-                        map_style="null"  # MUST be None to show TileLayer
+                        map_style=None  # disable Mapbox
                     )
                 )
 
         except Exception as e:
             st.error(f"Error: {e}")
-
