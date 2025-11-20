@@ -150,8 +150,17 @@ elif tool == "Parcel Plotter":
                 st.success("✅ Parcel plotted successfully!")
                 st.write(f"### Area: **{area:,.2f} m²**")
 
+                # Convert UTM → Lat/Lon
                 ll_coords = [transformer.transform(x, y) for x, y in utm_coords]
 
+                # --- Calculate min/max and parcel dimensions BEFORE using them ---
+                lons, lats = zip(*ll_coords)
+                min_lon, max_lon = min(lons), max(lons)
+                min_lat, max_lat = min(lats), max(lats)
+                parcel_width = max_lon - min_lon
+                parcel_height = max_lat - min_lat
+
+                # --- Map rendering ---
                 polygon_data = [{"coordinates": [ll_coords]}]
 
                 polygon_layer = pdk.Layer(
@@ -173,8 +182,7 @@ elif tool == "Parcel Plotter":
                     radius_max_pixels=30,
                 )
 
-                # --- Auto-zoom ---
-                lons, lats = zip(*ll_coords)
+                # Auto-zoom
                 lon_center = sum(lons)/len(lons)
                 lat_center = sum(lats)/len(lats)
                 lon_range = max(lons) - min(lons)
@@ -204,19 +212,19 @@ elif tool == "Parcel Plotter":
                     )
                 )
 
-                # --- PDF Sketch Download (Clean Layout + Dotted Lines) ---
+                # --- PDF Sketch ---
                 buffer = BytesIO()
                 c = canvas.Canvas(buffer, pagesize=A4)
                 width, height = A4
 
-                # Title block (centered)
+                # Title block (centered with dotted lines)
                 c.setFont("Helvetica-Bold", 12)
                 title_y = height - 50
                 line_spacing = 24
                 lines = [
                     "PLAN SHEWING LANDED PROPERTY",
                     "OF",
-                    "." * 70,  # dotted line
+                    "." * 70,
                     "AT",
                     "." * 70,
                     "." * 70,
@@ -235,8 +243,7 @@ elif tool == "Parcel Plotter":
 
                 # Scale bar below title block
                 scale_bar_width_px = 100
-                parcel_m_width = max_lon - min_lon
-                meter_per_px = parcel_m_width / (max([x for x,_ in ll_coords]) - min([x for x,_ in ll_coords]) + 1e-6)
+                meter_per_px = parcel_width / (max([x for x,_ in ll_coords]) - min([x for x,_ in ll_coords]) + 1e-6)
                 scale_m = round(scale_bar_width_px * meter_per_px)
                 scale_bar_y = title_y - len(lines) * line_spacing - 10
                 c.setStrokeColor(colors.black)
@@ -251,11 +258,7 @@ elif tool == "Parcel Plotter":
                 c.drawCentredString(width/2, scale_bar_y - 45, f"AREA = {area:,.2f} m²")
                 c.setFillColor(colors.black)
 
-                # Scale & center polygon
-                min_lon, max_lon = min(lons), max(lons)
-                min_lat, max_lat = min(lats), max(lats)
-                parcel_width = max_lon - min_lon
-                parcel_height = max_lat - min_lat
+                # Scale & center polygon on page
                 scale_factor = 0.6
                 page_width, page_height = width - 100, height - 200
                 scale_x = page_width / parcel_width if parcel_width != 0 else 1
