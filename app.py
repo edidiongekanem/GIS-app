@@ -153,14 +153,14 @@ elif tool == "Parcel Plotter":
                 # Convert UTM → Lat/Lon
                 ll_coords = [transformer.transform(x, y) for x, y in utm_coords]
 
-                # --- Calculate min/max and parcel dimensions BEFORE using them ---
+                # Calculate min/max and parcel dimensions
                 lons, lats = zip(*ll_coords)
                 min_lon, max_lon = min(lons), max(lons)
                 min_lat, max_lat = min(lats), max(lats)
                 parcel_width = max_lon - min_lon
                 parcel_height = max_lat - min_lat
 
-                # --- Map rendering ---
+                # Map rendering
                 polygon_data = [{"coordinates": [ll_coords]}]
 
                 polygon_layer = pdk.Layer(
@@ -212,7 +212,7 @@ elif tool == "Parcel Plotter":
                     )
                 )
 
-                # --- PDF Sketch ---
+                # PDF Sketch
                 buffer = BytesIO()
                 c = canvas.Canvas(buffer, pagesize=A4)
                 width, height = A4
@@ -241,16 +241,19 @@ elif tool == "Parcel Plotter":
                     else:
                         c.drawCentredString(width / 2, y, line)
 
-                # Origin & Area below scale bar
+                # Origin & Area below title block
+                origin_y = title_y - len(lines)*line_spacing - 10
                 c.setFont("Helvetica", 10)
-                c.drawCentredString(width/2, scale_bar_y - 30, "ORIGIN: UTM ZONE 32N")
+                c.drawCentredString(width/2, origin_y, "ORIGIN: UTM ZONE 32N")
                 c.setFont("Helvetica-Bold", 12)
                 c.setFillColor(colors.red)
-                c.drawCentredString(width/2, scale_bar_y - 45, f"AREA = {area:,.2f} m²")
+                c.drawCentredString(width/2, origin_y - 15, f"AREA = {area:,.2f} m²")
                 c.setFillColor(colors.black)
 
                 # Scale & center polygon on page
+                top_margin = 150
                 scale_factor = 0.6
+                page_center_y = (height - top_margin)/2 - 30
                 scale_x = (width - 100) / parcel_width if parcel_width != 0 else 1
                 scale_y = (height - top_margin - 100) / parcel_height if parcel_height != 0 else 1
                 scale = scale_factor * min(scale_x, scale_y)
@@ -305,4 +308,3 @@ elif tool == "Parcel Plotter":
 
         except Exception as e:
             st.error(f"Error: {e}")
-
