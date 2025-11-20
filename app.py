@@ -224,12 +224,12 @@ elif tool == "Parcel Plotter":
                 lines = [
                     "PLAN SHEWING LANDED PROPERTY",
                     "OF",
-                    "." * 50,
+                    "." * 30,
                     "AT",
-                    "." * 40,
-                    "." * 40,
-                    "." * 40,
-                    "." * 40
+                    "." * 30,
+                    "." * 30,
+                    "." * 30,
+                    "." * 30
                 ]
                 for i, line in enumerate(lines):
                     y = title_y - i * line_spacing
@@ -240,22 +240,6 @@ elif tool == "Parcel Plotter":
                         c.setDash()
                     else:
                         c.drawCentredString(width / 2, y, line)
-
-                # --- Calculate scale ratio and draw survey scale bar ---
-                top_margin = 150  # buffer for title block etc.
-                page_center_y = (height - top_margin)/2 - 30
-
-                printable_width_pt = width - 100
-                printable_width_m = parcel_width
-                scale_ratio = printable_width_m / (printable_width_pt * 0.0254 / 72)
-                scale_ratio = int(round(scale_ratio / 500.0) * 500)
-
-                scale_bar_length_pt = 100
-                scale_bar_m = scale_bar_length_pt * scale_ratio * 0.0254 / 72  # meters
-                scale_bar_y = title_y - len(lines)*line_spacing - 10
-                c.setStrokeColor(colors.black)
-                c.line(width/2 - scale_bar_length_pt/2, scale_bar_y, width/2 + scale_bar_length_pt/2, scale_bar_y)
-                c.drawCentredString(width/2, scale_bar_y - 12, f"1:{scale_ratio}  ({scale_bar_m:.0f} m)")
 
                 # Origin & Area below scale bar
                 c.setFont("Helvetica", 10)
@@ -321,3 +305,4 @@ elif tool == "Parcel Plotter":
 
         except Exception as e:
             st.error(f"Error: {e}")
+
