@@ -217,7 +217,7 @@ elif tool == "Parcel Plotter":
                          "AT", "----------------------------------------", "-----------------------------------",
                          "-----------------------------------", "------------------------------------"]
                 for i, line in enumerate(lines):
-                    c.drawRightString(width - 40, title_y - i * line_spacing, line)
+                    c.drawCentredString(width / 2, title_y - i * line_spacing, line)
 
                 # Scale & center polygon
                 min_lon, max_lon = min(lons), max(lons)
@@ -301,3 +301,4 @@ elif tool == "Parcel Plotter":
 
         except Exception as e:
             st.error(f"Error: {e}")
+
