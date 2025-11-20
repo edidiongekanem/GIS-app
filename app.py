@@ -196,7 +196,8 @@ elif tool == "Parcel Plotter":
                             longitude=centroid_lon,
                             latitude=centroid_lat,
                             zoom=17
-                        )
+                        ),
+                        map_style=None  # MUST be None to show TileLayer
                     )
                 )
 
