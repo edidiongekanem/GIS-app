@@ -195,12 +195,13 @@ elif tool == "Parcel Plotter":
                             zoom=17,
                             pitch=0,
                         ),
-                        map_style='satellite'  # disable Mapbox
+                        map_style="mapbox://styles/mapbox/satellite-v9"   # disable Mapbox
                     )
                 )
 
         except Exception as e:
             st.error(f"Error: {e}")
+
 
 
 
